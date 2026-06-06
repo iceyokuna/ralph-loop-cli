@@ -1,0 +1,5 @@
+# Built binary
+/ralph
+
+# Per-project ralph state
+.ralph/

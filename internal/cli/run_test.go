@@ -15,6 +15,8 @@ import (
 // that it fails before invoking the runner (FR-R1). A nil runner is safe here
 // precisely because validation must short-circuit first.
 func TestRunRunMissingPlanFiles(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 
 	tests := []struct {
@@ -58,6 +60,8 @@ func TestRunRunMissingPlanFiles(t *testing.T) {
 // TestRunCmdFlagDefaults asserts the load-bearing flag defaults: --iterations/-i
 // is 1 and the inherited persistent --dir/-d is ".".
 func TestRunCmdFlagDefaults(t *testing.T) {
+	t.Parallel()
+
 	root := newRootCmd()
 
 	var runCmd *cobra.Command

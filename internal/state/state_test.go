@@ -14,6 +14,8 @@ import (
 // TestEnsureCreatesDir verifies Ensure creates ".ralph/" with mode 0755 and is
 // idempotent.
 func TestEnsureCreatesDir(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	s := New(root)
 
@@ -40,6 +42,8 @@ func TestEnsureCreatesDir(t *testing.T) {
 // TestAppendRecordRoundTrips verifies that each appended Record is one JSON line
 // that round-trips with all fields populated, and that N appends yield N lines.
 func TestAppendRecordRoundTrips(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	s := New(root)
 	if err := s.Ensure(); err != nil {
@@ -104,6 +108,8 @@ func TestAppendRecordRoundTrips(t *testing.T) {
 // TestWriteTranscript verifies the per-iteration transcript file name, exact
 // bytes, and mode.
 func TestWriteTranscript(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	s := New(root)
 	if err := s.Ensure(); err != nil {
@@ -136,6 +142,8 @@ func TestWriteTranscript(t *testing.T) {
 // TestLogWriterAppends verifies LogWriter opens ralph.log for appending and that
 // writes accumulate across separate writers.
 func TestLogWriterAppends(t *testing.T) {
+	t.Parallel()
+
 	root := t.TempDir()
 	s := New(root)
 	if err := s.Ensure(); err != nil {

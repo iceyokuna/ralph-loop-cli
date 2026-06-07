@@ -49,14 +49,20 @@ func BuildArgs(o Options) []string {
 
 // ExecRunner is the production Runner: it shells out to the real claude binary.
 type ExecRunner struct {
-	Stdout io.Writer // streamed claude stdout; defaults to os.Stdout
+	stdout io.Writer // streamed claude stdout; defaults to os.Stdout
 }
 
-// Run executes claude in o.Dir, streaming stdout to r.Stdout while capturing it.
-// A non-zero exit is reported via Result.ExitCode with a nil error; only
-// start/wait failures return a non-nil error.
+// NewExecRunner returns an ExecRunner that streams claude's stdout to stdout
+// (nil defaults to os.Stdout).
+func NewExecRunner(stdout io.Writer) *ExecRunner {
+	return &ExecRunner{stdout: stdout}
+}
+
+// Run executes claude in o.Dir, streaming stdout to the configured writer while
+// capturing it. A non-zero exit is reported via Result.ExitCode with a nil
+// error; only start/wait failures return a non-nil error.
 func (r *ExecRunner) Run(ctx context.Context, o Options) (Result, error) {
-	out := r.Stdout
+	out := r.stdout
 	if out == nil {
 		out = os.Stdout
 	}
@@ -77,7 +83,7 @@ func (r *ExecRunner) Run(ctx context.Context, o Options) (Result, error) {
 			res.ExitCode = exitErr.ExitCode()
 			return res, nil
 		}
-		return res, fmt.Errorf("running claude: %w", err)
+		return res, fmt.Errorf("failed to run claude: %w", err)
 	}
 	return res, nil
 }

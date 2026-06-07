@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/iceyokuna/ralph-loop-cli/internal/claude"
+	"github.com/iceyokuna/ralph-loop-cli/internal/logger"
 	"github.com/iceyokuna/ralph-loop-cli/internal/loop"
 	"github.com/iceyokuna/ralph-loop-cli/internal/prompt"
 	"github.com/iceyokuna/ralph-loop-cli/internal/state"
@@ -30,7 +31,7 @@ func newRunCmd(opts *globalOptions) *cobra.Command {
 		Short: "Loop claude over implementation-plan.md until the task is complete",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runner := &claude.ExecRunner{Stdout: cmd.OutOrStdout()}
+			runner := claude.NewExecRunner(cmd.OutOrStdout())
 			return runRun(cmd.Context(), runner, opts, ro)
 		},
 	}
@@ -51,15 +52,17 @@ func runRun(ctx context.Context, runner claude.Runner, opts *globalOptions, ro *
 
 	store := state.New(opts.Dir)
 	if err := store.Ensure(); err != nil {
-		return fmt.Errorf("preparing state directory: %w", err)
+		return fmt.Errorf("failed to prepare state directory: %w", err)
 	}
 	logW, err := store.LogWriter()
 	if err != nil {
-		return fmt.Errorf("opening run log: %w", err)
+		return fmt.Errorf("failed to open run log: %w", err)
 	}
 	defer logW.Close()
 
-	engine := &loop.Engine{Runner: runner, Log: io.MultiWriter(os.Stderr, logW), Store: store}
+	log := logger.New(io.MultiWriter(os.Stderr, logW))
+	engine := loop.NewEngine(log, runner)
+	engine.SetStore(store)
 	outcome, err := engine.Run(ctx, loop.Config{
 		Iterations: ro.Iterations,
 		Gate:       ro.Gate,
@@ -71,7 +74,7 @@ func runRun(ctx context.Context, runner claude.Runner, opts *globalOptions, ro *
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("running loop: %w", err)
+		return fmt.Errorf("failed to run loop: %w", err)
 	}
 	if !outcome.Completed {
 		return fmt.Errorf("reached iteration cap (%d) without completion", outcome.Iterations)
@@ -88,11 +91,11 @@ func readPlanFiles(dir string) (reqs, plan string, err error) {
 
 	reqsBytes, err := os.ReadFile(reqsPath)
 	if err != nil {
-		return "", "", fmt.Errorf("reading %s: %w", reqsPath, err)
+		return "", "", fmt.Errorf("failed to read %s: %w", reqsPath, err)
 	}
 	planBytes, err := os.ReadFile(planPath)
 	if err != nil {
-		return "", "", fmt.Errorf("reading %s: %w", planPath, err)
+		return "", "", fmt.Errorf("failed to read %s: %w", planPath, err)
 	}
 	return string(reqsBytes), string(planBytes), nil
 }

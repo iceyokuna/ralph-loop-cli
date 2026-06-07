@@ -6,6 +6,8 @@ import (
 )
 
 func TestPlanPrompt(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		task string
@@ -40,6 +42,8 @@ func TestPlanPrompt(t *testing.T) {
 }
 
 func TestRunPrompt(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		reqs string

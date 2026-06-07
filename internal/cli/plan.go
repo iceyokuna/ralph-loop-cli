@@ -20,7 +20,7 @@ func newPlanCmd(opts *globalOptions) *cobra.Command {
 		Short: "Run claude once to produce requirements.md and implementation-plan.md",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runner := &claude.ExecRunner{Stdout: cmd.OutOrStdout()}
+			runner := claude.NewExecRunner(cmd.OutOrStdout())
 			return runPlan(cmd.Context(), runner, opts, args[0])
 		},
 	}
@@ -39,7 +39,7 @@ func runPlan(ctx context.Context, runner claude.Runner, opts *globalOptions, tas
 	started := time.Now()
 	res, err := runner.Run(ctx, o)
 	if err != nil {
-		return fmt.Errorf("planning task: %w", err)
+		return fmt.Errorf("failed to run plan: %w", err)
 	}
 	recordPlanRun(opts.Dir, started, res)
 	if res.ExitCode != 0 {

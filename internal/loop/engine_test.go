@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -37,6 +36,8 @@ func (f *fakeRunner) Run(_ context.Context, _ claude.Options) (claude.Result, er
 }
 
 func TestRunNeverCompletesRunsAllIterations(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		n    int
@@ -48,7 +49,7 @@ func TestRunNeverCompletesRunsAllIterations(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			fr := &fakeRunner{}
-			eng := &Engine{Runner: fr, Log: io.Discard}
+			eng := NewEngine(nil, fr)
 
 			out, err := eng.Run(context.Background(), Config{Iterations: tc.n})
 			if err != nil {
@@ -68,6 +69,8 @@ func TestRunNeverCompletesRunsAllIterations(t *testing.T) {
 }
 
 func TestRunContinuesPastClaudeErrors(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		n    int
@@ -107,7 +110,7 @@ func TestRunContinuesPastClaudeErrors(t *testing.T) {
 					return claude.Result{}, nil
 				},
 			}
-			eng := &Engine{Runner: fr, Log: io.Discard}
+			eng := NewEngine(nil, fr)
 
 			out, err := eng.Run(context.Background(), Config{Iterations: tc.n})
 			if err != nil {
@@ -127,6 +130,8 @@ func TestRunContinuesPastClaudeErrors(t *testing.T) {
 }
 
 func TestContainsPromise(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		out  string
@@ -154,6 +159,8 @@ func TestContainsPromise(t *testing.T) {
 // runner emits the promise token on every iteration from completeAt onward; the
 // gate is an injected closure whose pass/fail is fixed per case.
 func TestRunCompletionMatrix(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		n    int
@@ -216,7 +223,8 @@ func TestRunCompletionMatrix(t *testing.T) {
 				return nil
 			}
 
-			eng := &Engine{Runner: fr, Log: io.Discard, Gate: gate}
+			eng := NewEngine(nil, fr)
+			eng.SetGate(gate)
 			out, err := eng.Run(context.Background(), Config{Iterations: tc.n, Gate: tc.gate})
 			if err != nil {
 				t.Fatalf("Run error: %v", err)
@@ -244,6 +252,8 @@ func TestRunCompletionMatrix(t *testing.T) {
 // the gate run/exit-code fields. It walks three iterations: (1) claude errors,
 // (2) token + failing gate, (3) token + passing gate (completes).
 func TestRunRecordsState(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	store := state.New(dir)
 	if err := store.Ensure(); err != nil {
@@ -270,7 +280,9 @@ func TestRunRecordsState(t *testing.T) {
 		return nil
 	}
 
-	eng := &Engine{Runner: fr, Log: io.Discard, Gate: gate, Store: store}
+	eng := NewEngine(nil, fr)
+	eng.SetGate(gate)
+	eng.SetStore(store)
 	out, err := eng.Run(context.Background(), Config{Iterations: 3, Gate: "go test ./...", Options: claude.Options{}})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -323,6 +335,8 @@ func TestRunRecordsState(t *testing.T) {
 
 // TestRunGate exercises the real shell gate runner (no claude, no network).
 func TestRunGate(t *testing.T) {
+	t.Parallel()
+
 	if err := RunGate(context.Background(), "exit 0"); err != nil {
 		t.Errorf(`RunGate("exit 0") = %v, want nil`, err)
 	}

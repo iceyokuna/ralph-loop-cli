@@ -1,84 +1,124 @@
 # ralph-loop-cli
 
-`ralph` is a single-binary Go CLI that automates the **Ralph loop** (Geoffrey
-Huntley's bash-loop technique): it repeatedly invokes the `claude` CLI
-non-interactively (via `--print`) until a task is complete. `ralph` writes no
-application code itself — it only orchestrates `claude`, streams its output,
-checks for completion, and manages per-project state in `.ralph/`.
+`ralph` is a tiny Go command-line tool that automates the **"Ralph loop"** —
+Geoffrey Huntley's trick of running the `claude` CLI over and over until a coding
+task is finished.
+
+`ralph` writes no code itself. It just drives `claude`: it feeds it a prompt,
+streams the output, checks whether the work is done, and keeps a log of every
+attempt. Think of it as a patient operator that keeps asking `claude` to "do the
+next step" until the whole task is complete.
+
+## How it works
+
+1. **Plan** — you describe a task once. `ralph` asks `claude` to break it into a
+   `requirements.md` and an `implementation-plan.md` (a checklist of small steps).
+2. **Run** — `ralph` calls `claude` in a loop. Each pass, `claude` does the next
+   unchecked step and ticks it off.
+3. **Stop** — the loop ends when `claude` prints the magic token
+   `<promise>RALPH_DONE</promise>` (and, if you set a `--gate`, that command also
+   passes — e.g. your tests are green). If it never finishes within the iteration
+   limit, `ralph` exits with an error.
+
+```
+ralph plan "build a TODO API"   ->  requirements.md + implementation-plan.md
+ralph run -i 10                 ->  loop: step, step, step ... done
+```
+
+## Requirements
+
+- Go 1.24+ (to build).
+- The [`claude` CLI](https://docs.claude.com/en/docs/claude-code) installed and
+  on your `PATH` (`ralph` shells out to it).
 
 ## Install
 
 ```sh
 go install github.com/iceyokuna/ralph-loop-cli/cmd/ralph@latest
-# or, from a clone:
-make install        # go install with version ldflags
-make build          # build ./ralph in the working tree
 ```
 
-Cross-compile by setting `GOOS`/`GOARCH`, e.g. `GOOS=linux GOARCH=amd64 make build`.
+Or from a clone of this repo:
 
 ```sh
-ralph --version     # prints version (commit, built date) injected at build time
+make install     # go install, with version info baked in
+make build       # build ./ralph in the current folder instead
 ```
 
-## Usage
-
-### Plan
-
-Run `claude` once to turn a task into `requirements.md` and
-`implementation-plan.md` (a `- [ ]` checklist of small, testable steps):
+Check it works:
 
 ```sh
-ralph plan "build a TODO API" -d ./demo
+ralph --version
 ```
 
-### Run
-
-Loop `claude` over the plan until done or the iteration cap is reached:
+## Quick start
 
 ```sh
-ralph run -d ./demo -i 5
+# 1. Turn an idea into a plan (runs claude once)
+ralph plan "build a small TODO REST API in Go" -d ./todo
+
+# 2. Implement it, up to 10 passes, stopping when the tests pass
+ralph run -d ./todo -i 10 --gate "go test ./..."
 ```
 
-Each iteration tells `claude` to implement the next unchecked task. The loop
-completes when `claude` emits `<promise>RALPH_DONE</promise>` in its output. With
-a **gate**, completion also requires the gate command to exit 0 — a failing gate
-keeps the loop going:
+While `run` is looping you'll see `claude`'s output live, plus progress lines.
+When it finishes you'll get `ralph: task complete after N iteration(s)`.
+
+## Commands
+
+### `ralph plan "<task>" -d <dir>`
+
+Runs `claude` **once** to create two files in `<dir>`:
+
+- `requirements.md` — what the software must do.
+- `implementation-plan.md` — an ordered `- [ ]` checklist of small, testable steps.
+
+### `ralph run -d <dir> -i <n>`
+
+Loops `claude` over the plan in `<dir>`, up to `<n>` times. Each pass implements
+the next unchecked step. The loop stops early when the task is complete (see
+[How it works](#how-it-works)); reaching the limit first exits non-zero.
+
+Add `--gate "<cmd>"` to require a command to pass before the run counts as done:
 
 ```sh
-ralph run -d ./demo -i 5 --gate "go test ./..."
+ralph run -d ./todo -i 10 --gate "go build ./... && go test ./..."
 ```
 
-Reaching the iteration cap without completion exits non-zero with a clear
-message.
+A failing gate keeps the loop going — handy for "don't stop until the build and
+tests are green."
 
 ## Flags
 
-| flag           | short | default | applies | meaning                                              |
-|----------------|-------|---------|---------|------------------------------------------------------|
-| `--dir`        | `-d`  | `"."`   | both    | target project directory                             |
-| `--iterations` | `-i`  | `1`     | run     | max loop iterations                                  |
-| `--perm`       | `-p`  | `false` | both    | pass `--dangerously-skip-permissions` to `claude`    |
-| `--gate`       |       | `""`    | run     | completion gate command, e.g. `go test ./...`        |
-| `--model`      |       | `""`    | both    | model override (falls back to `RALPH_MODEL`)         |
+| Flag           | Short | Default | Used by | Meaning                                           |
+|----------------|-------|---------|---------|---------------------------------------------------|
+| `--dir`        | `-d`  | `.`     | both    | target project directory                          |
+| `--iterations` | `-i`  | `1`     | run     | maximum number of loop passes                     |
+| `--gate`       |       | `""`    | run     | command that must exit 0 to finish (e.g. tests)   |
+| `--perm`       | `-p`  | `false` | both    | pass `--dangerously-skip-permissions` to `claude` |
+| `--model`      |       | `""`    | both    | `claude` model override                           |
 
-`--print` is **always** passed to `claude`; `-p` only toggles
-`--dangerously-skip-permissions`. Model precedence: `--model` > `RALPH_MODEL` >
-`claude`'s own default.
+Notes:
 
-## State (`.ralph/` inside `<dir>`)
+- `ralph` always runs `claude` non-interactively (`--print`). `-p` only controls
+  whether `--dangerously-skip-permissions` is added.
+- Model is chosen in this order: `--model` flag → `RALPH_MODEL` env var →
+  `claude`'s own default.
 
-- `ralph.log` — human-readable run log (appended).
-- `iterations.jsonl` — one JSON record per iteration (`index`, `started_at`,
-  `finished_at`, `claude_exit_code`, `promise_found`, `gate_ran`,
-  `gate_exit_code`).
-- `iter-NNN.txt` — full captured `claude` transcript for iteration NNN.
+## Where state is kept (`.ralph/`)
 
-`.ralph/` is created on demand and is git-ignored.
+Each run records what happened in a `.ralph/` folder inside your `<dir>`:
+
+- `ralph.log` — a structured log line for every iteration.
+- `iterations.jsonl` — one JSON record per pass (timing, `claude`'s exit code,
+  whether the token was found, gate result).
+- `iter-001.txt`, `iter-002.txt`, … — the full `claude` output for each pass.
+
+`.ralph/` is created automatically and is git-ignored.
 
 ## Development
 
 ```sh
-make test    # offline unit tests; never invokes the real claude or network
-make vet
+make test    # run the unit tests (offline; never calls the real claude)
+make vet     # go vet
+make build   # build the binary
 ```

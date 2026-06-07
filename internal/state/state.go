@@ -39,7 +39,7 @@ type Record struct {
 // Ensure creates ".ralph/" (mode 0755) if needed.
 func (s *Store) Ensure() error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
-		return fmt.Errorf("creating %s: %w", s.dir, err)
+		return fmt.Errorf("failed to create %s: %w", s.dir, err)
 	}
 	return nil
 }
@@ -49,7 +49,7 @@ func (s *Store) LogWriter() (io.WriteCloser, error) {
 	path := filepath.Join(s.dir, "ralph.log")
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		return nil, fmt.Errorf("opening %s: %w", path, err)
+		return nil, fmt.Errorf("failed to open %s: %w", path, err)
 	}
 	return f, nil
 }
@@ -58,7 +58,7 @@ func (s *Store) LogWriter() (io.WriteCloser, error) {
 func (s *Store) AppendRecord(r Record) error {
 	data, err := json.Marshal(r)
 	if err != nil {
-		return fmt.Errorf("marshaling record: %w", err)
+		return fmt.Errorf("failed to marshal record: %w", err)
 	}
 	return s.appendFile("iterations.jsonl", append(data, '\n'))
 }
@@ -68,7 +68,7 @@ func (s *Store) AppendRecord(r Record) error {
 func (s *Store) WriteTranscript(i int, data string) error {
 	path := filepath.Join(s.dir, fmt.Sprintf("iter-%03d.txt", i))
 	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
+		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
 	return nil
 }
@@ -78,11 +78,11 @@ func (s *Store) appendFile(name string, data []byte) error {
 	path := filepath.Join(s.dir, name)
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		return fmt.Errorf("opening %s: %w", path, err)
+		return fmt.Errorf("failed to open %s: %w", path, err)
 	}
 	defer f.Close()
 	if _, err := f.Write(data); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
+		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
 	return nil
 }

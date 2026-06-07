@@ -7,8 +7,8 @@ package loop
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -18,6 +18,9 @@ import (
 	"github.com/iceyokuna/ralph-loop-cli/internal/prompt"
 	"github.com/iceyokuna/ralph-loop-cli/internal/state"
 )
+
+// discardLogger drops all records; used when NewEngine is given a nil logger.
+var discardLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // Config describes a single loop run.
 type Config struct {
@@ -34,10 +37,31 @@ type Outcome struct {
 
 // Engine runs the Ralph loop against an injected Runner.
 type Engine struct {
-	Runner claude.Runner                               // invokes claude each iteration
-	Log    io.Writer                                   // progress lines; nil discards
-	Gate   func(ctx context.Context, cmd string) error // gate runner; nil uses RunGate
-	Store  *state.Store                                // if set, records each iteration
+	logger *slog.Logger
+	runner claude.Runner
+	gate   func(ctx context.Context, cmd string) error
+	store  *state.Store
+}
+
+// NewEngine returns an Engine that invokes runner each iteration and logs
+// progress to logger (nil discards). Optional behaviour is added via SetGate and
+// SetStore.
+func NewEngine(logger *slog.Logger, runner claude.Runner) *Engine {
+	if logger == nil {
+		logger = discardLogger
+	}
+	logger = logger.With(slog.String("component", "loop"))
+	return &Engine{logger: logger, runner: runner}
+}
+
+// SetGate sets the gate runner used to validate completion (nil uses RunGate).
+func (e *Engine) SetGate(gate func(ctx context.Context, cmd string) error) {
+	e.gate = gate
+}
+
+// SetStore sets the store that records each iteration's transcript and record.
+func (e *Engine) SetStore(store *state.Store) {
+	e.store = store
 }
 
 // Run loops up to cfg.Iterations passes. An iteration completes when claude's
@@ -48,10 +72,10 @@ func (e *Engine) Run(ctx context.Context, cfg Config) (Outcome, error) {
 	var out Outcome
 	for i := 1; i <= cfg.Iterations; i++ {
 		out.Iterations = i
-		e.logf("iteration %d/%d: invoking claude", i, cfg.Iterations)
+		e.logger.Info("invoking claude", slog.Int("iteration", i), slog.Int("max", cfg.Iterations))
 
 		started := time.Now()
-		res, runErr := e.Runner.Run(ctx, cfg.Options)
+		res, runErr := e.runner.Run(ctx, cfg.Options)
 		rec := state.Record{
 			Index:          i,
 			StartedAt:      started,
@@ -62,20 +86,20 @@ func (e *Engine) Run(ctx context.Context, cfg Config) (Outcome, error) {
 		switch {
 		case runErr != nil:
 			rec.ClaudeExitCode = -1
-			e.logf("iteration %d: claude failed to run: %v (continuing)", i, runErr)
+			e.logger.Error("claude failed to run", slog.Int("iteration", i), slog.String("error", runErr.Error()))
 		case res.ExitCode != 0:
-			e.logf("iteration %d: claude exited with code %d (continuing)", i, res.ExitCode)
+			e.logger.Warn("claude exited non-zero", slog.Int("iteration", i), slog.Int("exit_code", res.ExitCode))
 		default:
-			e.logf("iteration %d: claude exited 0", i)
+			e.logger.Info("claude exited", slog.Int("iteration", i), slog.Int("exit_code", res.ExitCode))
 		}
 
 		rec.PromiseFound = containsPromise(res.Output)
 		completed := false
 		if rec.PromiseFound {
-			completed = e.checkGate(ctx, cfg.Gate, i, &rec)
+			completed = e.checkGate(ctx, cfg.Gate, &rec)
 		}
 
-		e.record(i, rec, res.Output)
+		e.record(rec, res.Output)
 
 		if completed {
 			out.Completed = true
@@ -87,38 +111,39 @@ func (e *Engine) Run(ctx context.Context, cfg Config) (Outcome, error) {
 
 // checkGate reports whether a token-emitting iteration completes: true with no
 // gate, otherwise only if the gate exits 0. It fills rec's gate fields.
-func (e *Engine) checkGate(ctx context.Context, gateCmd string, i int, rec *state.Record) bool {
+func (e *Engine) checkGate(ctx context.Context, gateCmd string, rec *state.Record) bool {
 	if gateCmd == "" {
-		e.logf("iteration %d: promise found, no gate — complete", i)
+		e.logger.Info("promise found, no gate; completing", slog.Int("iteration", rec.Index))
 		return true
 	}
 
 	rec.GateRan = true
-	gate := e.Gate
+	gate := e.gate
 	if gate == nil {
 		gate = RunGate
 	}
 	gateErr := gate(ctx, gateCmd)
 	rec.GateExitCode = exitCode(gateErr)
 	if gateErr == nil {
-		e.logf("iteration %d: promise found and gate passed — complete", i)
+		e.logger.Info("promise found and gate passed; completing", slog.Int("iteration", rec.Index))
 		return true
 	}
-	e.logf("iteration %d: promise found but gate failed (exit %d) — continuing", i, rec.GateExitCode)
+	e.logger.Warn("promise found but gate failed; continuing",
+		slog.Int("iteration", rec.Index), slog.Int("gate_exit_code", rec.GateExitCode))
 	return false
 }
 
-// record writes the iteration's transcript and JSONL record when a Store is set.
+// record writes the iteration's transcript and JSONL record when a store is set.
 // Write failures are logged, never fatal.
-func (e *Engine) record(i int, rec state.Record, transcript string) {
-	if e.Store == nil {
+func (e *Engine) record(rec state.Record, transcript string) {
+	if e.store == nil {
 		return
 	}
-	if err := e.Store.WriteTranscript(i, transcript); err != nil {
-		e.logf("iteration %d: writing transcript: %v", i, err)
+	if err := e.store.WriteTranscript(rec.Index, transcript); err != nil {
+		e.logger.Error("failed to write transcript", slog.Int("iteration", rec.Index), slog.String("error", err.Error()))
 	}
-	if err := e.Store.AppendRecord(rec); err != nil {
-		e.logf("iteration %d: writing record: %v", i, err)
+	if err := e.store.AppendRecord(rec); err != nil {
+		e.logger.Error("failed to write record", slog.Int("iteration", rec.Index), slog.String("error", err.Error()))
 	}
 }
 
@@ -147,12 +172,4 @@ func exitCode(err error) int {
 		return ee.ExitCode()
 	}
 	return 1
-}
-
-// logf writes a progress line when e.Log is set.
-func (e *Engine) logf(format string, args ...any) {
-	if e.Log == nil {
-		return
-	}
-	fmt.Fprintf(e.Log, format+"\n", args...)
 }
